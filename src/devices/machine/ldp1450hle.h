@@ -50,7 +50,7 @@ protected:
 	// laserdisc_device implementation
 	virtual void player_vsync(const vbi_metadata &vbi, int fieldnum, const attotime &curtime) override;
 	virtual s32 player_update(const vbi_metadata &vbi, int fieldnum, const attotime &curtime) override;
-	virtual void player_overlay(bitmap_yuy16 &bitmap) override { }
+	virtual void player_overlay(bitmap_yuy16 &bitmap) override;
 
 	// device_serial_interface implementation
 	virtual void rcv_complete() override;
@@ -59,6 +59,11 @@ protected:
 
 	TIMER_CALLBACK_MEMBER(process_vbi_data);
 	TIMER_CALLBACK_MEMBER(process_queue);
+
+	// internal overlay helpers
+	void overlay_draw_group(bitmap_yuy16 &bitmap, const uint8_t *text, int start, int xstart, int ystart, int mode);
+	void overlay_erase(bitmap_yuy16 &bitmap, float xstart, float xend);
+	void overlay_draw_char(bitmap_yuy16 &bitmap, uint8_t ch, float xstart);
 
 private:
 	enum player_command : u16
@@ -186,12 +191,13 @@ private:
 	u32            m_speed_accum;
 	u32            m_curr_frame;
 
+	bool           m_user_index_flag;
 	u8             m_user_index_x;
 	u8             m_user_index_y;
 	u8             m_user_index_mode;
 	u8             m_user_index_char_idx;
 	u8             m_user_index_window_idx;
-	char           m_user_index_chars[32];
+	u8	           m_user_index_chars[32];
 
 };
 
