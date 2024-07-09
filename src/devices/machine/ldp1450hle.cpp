@@ -193,13 +193,8 @@ static const u16 text_bitmap[0x60][0x10] =
 	{0x0000,0x0000,0x0000,0x0000,0x0000,0x0000,0x0000,0x1ff8,0x1ff8,0x0000,0x0000,0x0000,0x0000,0x0000,0x0000,0x0000}, // -
 };
 
-#define OVERLAY_GROUP0_X                (82.0f / 720.0f)
-#define OVERLAY_GROUP1_X                (162.0f / 720.0f)
-#define OVERLAY_GROUP2_X                (322.0f / 720.0f)
-#define OVERLAY_GROUP3_X                (483.0f / 720.0f)
-#define OVERLAY_Y                       (104/2)
-#define OVERLAY_PIXEL_WIDTH             (4.5f / 720.0f)
-#define OVERLAY_PIXEL_HEIGHT            2
+#define OVERLAY_PIXEL_WIDTH             (1.0f / 720.0f)
+#define OVERLAY_PIXEL_HEIGHT            1
 #define OVERLAY_X_PIXELS                16
 #define OVERLAY_Y_PIXELS                16
 
@@ -211,24 +206,21 @@ static const u16 text_bitmap[0x60][0x10] =
 void sony_ldp1450hle_device::overlay_draw_group(bitmap_yuy16 &bitmap, const uint8_t *text, int start, int xstart, int ystart, int mode)
 {
 	int count = 0x20 - start;
-	// erase the background
-//	overlay_erase(bitmap, xstart, xstart + ((OVERLAY_X_PIXELS + 1) * count + 1) * OVERLAY_PIXEL_WIDTH);
+	float xstart_normalised = (720.0f/ 64) * xstart;
 
-	// bool skip = true;
 	for (int x = start; x < count; x++)
-//		if (!skip || x == count - 1 || (text[x] & 0x3f) != 0x30)
+	{
+		if (text[x] == 0x1a)
 		{
-			// skip = false;
-			if (text[x] == 0x1a)
-			{
-				break;
-			}
-			else
-			{
-				overlay_draw_char(bitmap, text[x], xstart + ((OVERLAY_X_PIXELS + 1) * x + 1) * OVERLAY_PIXEL_WIDTH);
-			}
+			break;
 		}
-}
+		else
+		{
+			// overlay_erase(bitmap, xstart_normalised, xstart_normalised + ((OVERLAY_X_PIXELS + 1) * x + 1) * OVERLAY_PIXEL_WIDTH, ystart);
+			overlay_draw_char(bitmap, text[x], xstart_normalised + ((OVERLAY_X_PIXELS + 1) * x + 1) * OVERLAY_PIXEL_WIDTH, ystart);
+		}
+	}
+}	
 
 
 //-------------------------------------------------
@@ -236,12 +228,12 @@ void sony_ldp1450hle_device::overlay_draw_group(bitmap_yuy16 &bitmap, const uint
 //  where the text overlay will be displayed
 //-------------------------------------------------
 
-void sony_ldp1450hle_device::overlay_erase(bitmap_yuy16 &bitmap, float xstart, float xend)
+void sony_ldp1450hle_device::overlay_erase(bitmap_yuy16 &bitmap, float xstart, float xend, int ystart)
 {
 	uint32_t xmin = uint32_t(xstart * 256.0f * float(bitmap.width()));
 	uint32_t xmax = uint32_t(xend * 256.0f * float(bitmap.width()));
 
-	for (uint32_t y = OVERLAY_Y; y < (OVERLAY_Y + (OVERLAY_Y_PIXELS + 2) * OVERLAY_PIXEL_HEIGHT); y++)
+	for (uint32_t y = ystart; y < (ystart + (OVERLAY_Y_PIXELS) * OVERLAY_PIXEL_HEIGHT); y++)
 	{
 		uint16_t *dest = &bitmap.pix(y, xmin >> 8);
 		uint16_t ymax = *dest >> 8;
@@ -271,7 +263,7 @@ void sony_ldp1450hle_device::overlay_erase(bitmap_yuy16 &bitmap, float xstart, f
 //  of the text overlay
 //-------------------------------------------------
 
-void sony_ldp1450hle_device::overlay_draw_char(bitmap_yuy16 &bitmap, uint8_t ch, float xstart)
+void sony_ldp1450hle_device::overlay_draw_char(bitmap_yuy16 &bitmap, uint8_t ch, float xstart, int ystart)
 {
 	u32 xminbase = uint32_t(xstart * 256.0f * float(bitmap.width()));
 	u32 xsize = uint32_t(OVERLAY_PIXEL_WIDTH * 256.0f * float(bitmap.width()));
@@ -281,23 +273,22 @@ void sony_ldp1450hle_device::overlay_draw_char(bitmap_yuy16 &bitmap, uint8_t ch,
 	for (u32 y = 0; y < OVERLAY_Y_PIXELS; y++)
 	{
 		u16 chdata = *chdataptr++;
-		printf("%04x \n ",chdata);
 
-		for (u32 x = 0; x < OVERLAY_X_PIXELS; x++, chdata <<= 1)
+		for (uint32_t x = 0; x < OVERLAY_X_PIXELS; x++, chdata >>= 1)
 		{
-			// if (chdata)
+			uint32_t xmin = xminbase + x * xsize;
+			uint32_t xmax = xmin + xsize;
+			for (uint32_t yy = 0; yy < OVERLAY_PIXEL_HEIGHT; yy++)
 			{
-				uint32_t xmin = xminbase + x * xsize;
-				uint32_t xmax = xmin + xsize;
-				for (uint32_t yy = 0; yy < OVERLAY_PIXEL_HEIGHT; yy++)
+				uint16_t *dest = &bitmap.pix(ystart + (y + 1) * OVERLAY_PIXEL_HEIGHT + yy, xmin >> 8);
+				uint16_t ymax = 0xff;
+				uint16_t ymin = *dest >> 8;
+				uint16_t yres = ymin + ((ymax - ymin) * (~xmin & 0xff)) / 256;
+				if (chdata & 0x01)
 				{
-					uint16_t *dest = &bitmap.pix(OVERLAY_Y + (y + 1) * OVERLAY_PIXEL_HEIGHT + yy, xmin >> 8);
-					uint16_t ymax = 0xff;
-					uint16_t ymin = *dest >> 8;
-					uint16_t yres = ymin + ((ymax - ymin) * (~xmin & 0xff)) / 256;
 					*dest = (yres << 8) | (*dest & 0xff);
 					dest++;
-
+	
 					for (uint32_t xx = (xmin | 0xff) + 1; xx < xmax; xx += 0x100)
 						*dest++ = 0xf080;
 
@@ -433,7 +424,6 @@ void sony_ldp1450hle_device::add_command_byte(u8 command)
 		case SUBMODE_USER_INDEX_STRING_2:
 		{
 			m_user_index_chars[m_user_index_char_idx] = (command & 0x5f);
-			// printf("IDX %x, Val %x, Char %c Array %s \n", m_user_index_char_idx, command, (char)(command & 0x5f), m_user_index_chars );
 			if (command == 0x1a)
 			{
 				m_submode = SUBMODE_NORMAL;
