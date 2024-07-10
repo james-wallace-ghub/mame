@@ -91,6 +91,13 @@ sony_ldp1450hle_device::sony_ldp1450hle_device(const machine_config &mconfig, co
 {
 }
 
+static const u8 text_size[0x04] =
+{
+	16,
+	32,
+	48,
+	64
+};
 
 // bitmaps for the characters
 static const u16 text_bitmap[0x60][0x10] =
@@ -195,8 +202,6 @@ static const u16 text_bitmap[0x60][0x10] =
 
 #define OVERLAY_PIXEL_WIDTH             (1.0f / 720.0f)
 #define OVERLAY_PIXEL_HEIGHT            1
-#define OVERLAY_X_PIXELS                16
-#define OVERLAY_Y_PIXELS                16
 
 //-------------------------------------------------
 //  overlay_draw_group - draw a single group of
@@ -205,57 +210,70 @@ static const u16 text_bitmap[0x60][0x10] =
 
 void sony_ldp1450hle_device::overlay_draw_group(bitmap_yuy16 &bitmap, const uint8_t *text, int start, int xstart, int ystart, int mode)
 {
-	int count = 0x20 - start;
+
+	u8 char_width = text_size[m_user_index_mode & 0x04];
+	u8 char_height = text_size[m_user_index_mode >> 2 & 0x04];
 	float xstart_normalised = (720.0f/ 64) * xstart;
 
-	for (int x = start; x < count; x++)
+	if (m_user_index_mode & 0x80)
 	{
-		if (text[x] == 0x1a)
+		//Draw a blue screen overlay on the screen as a pseudo squelch
+		uint16_t color0 = (40 << 8) | 0xf0;
+		uint16_t color1 = (40 << 8) | 0x6d;
+
+		for (int y = 0; y < bitmap.height(); y++)
 		{
-			break;
-		}
-		else
-		{
-			// overlay_erase(bitmap, xstart_normalised, xstart_normalised + ((OVERLAY_X_PIXELS + 1) * x + 1) * OVERLAY_PIXEL_WIDTH, ystart);
-			overlay_draw_char(bitmap, text[x], xstart_normalised + ((OVERLAY_X_PIXELS + 1) * x + 1) * OVERLAY_PIXEL_WIDTH, ystart);
+			uint16_t *dest = &bitmap.pix(y);
+			for (int x = 0; x < bitmap.width() / 2; x++)
+			{
+				*dest++ = color0;
+				*dest++ = color1;
+			}
 		}
 	}
+
+	// m_user_index_mode >> 5 & 0x04: 0,2 = normal, 1 = 1px shadow, 3 = grey box 
+
+	u8 count;
+	if (m_user_index_mode & 0x10) // 3 line mode
+	{
+		count = 10;
+		bool eos = false;
+
+		for (int y = 0; y <2; y++)
+		{
+			for (int x = start; x < count; x++)
+			{
+				if (text[x] == 0x1a || eos)
+				{
+					break;
+				}
+				else
+				{
+					overlay_draw_char(bitmap, text[x], xstart_normalised + ((char_width + 1) * x + 1) * OVERLAY_PIXEL_WIDTH, ystart +(y*char_height), char_width, char_height);
+				}
+			}
+		}
+	}
+	else
+	{
+		count = 0x20 - start;
+
+		for (int x = start; x < count; x++)
+		{
+			if (text[x] == 0x1a)
+			{
+				break;
+			}
+			else
+			{
+				overlay_draw_char(bitmap, text[x], xstart_normalised + ((char_width + 1) * x + 1) * OVERLAY_PIXEL_WIDTH, ystart, char_width, char_height);
+			}
+		}
+
+	}
+
 }	
-
-
-//-------------------------------------------------
-//  overlay_erase - erase the background area
-//  where the text overlay will be displayed
-//-------------------------------------------------
-
-void sony_ldp1450hle_device::overlay_erase(bitmap_yuy16 &bitmap, float xstart, float xend, int ystart)
-{
-	uint32_t xmin = uint32_t(xstart * 256.0f * float(bitmap.width()));
-	uint32_t xmax = uint32_t(xend * 256.0f * float(bitmap.width()));
-
-	for (uint32_t y = ystart; y < (ystart + (OVERLAY_Y_PIXELS) * OVERLAY_PIXEL_HEIGHT); y++)
-	{
-		uint16_t *dest = &bitmap.pix(y, xmin >> 8);
-		uint16_t ymax = *dest >> 8;
-		uint16_t ymin = ymax * 3 / 8;
-		uint16_t yres = ymin + ((ymax - ymin) * (xmin & 0xff)) / 256;
-		*dest = (yres << 8) | (*dest & 0xff);
-		dest++;
-
-		for (uint32_t x = (xmin | 0xff) + 1; x < xmax; x += 0x100)
-		{
-			yres = (*dest >> 8) * 3 / 8;
-			*dest = (yres << 8) | (*dest & 0xff);
-			dest++;
-		}
-
-		ymax = *dest >> 8;
-		ymin = ymax * 3 / 8;
-		yres = ymin + ((ymax - ymin) * (~xmax & 0xff)) / 256;
-		*dest = (yres << 8) | (*dest & 0xff);
-		dest++;
-	}
-}
 
 
 //-------------------------------------------------
@@ -263,18 +281,21 @@ void sony_ldp1450hle_device::overlay_erase(bitmap_yuy16 &bitmap, float xstart, f
 //  of the text overlay
 //-------------------------------------------------
 
-void sony_ldp1450hle_device::overlay_draw_char(bitmap_yuy16 &bitmap, uint8_t ch, float xstart, int ystart)
+void sony_ldp1450hle_device::overlay_draw_char(bitmap_yuy16 &bitmap, uint8_t ch, float xstart, int ystart, int char_width, int char_height)
 {
+
+	// m_user_index_mode
+
 	u32 xminbase = uint32_t(xstart * 256.0f * float(bitmap.width()));
 	u32 xsize = uint32_t(OVERLAY_PIXEL_WIDTH * 256.0f * float(bitmap.width()));
 
 	// iterate over pixels
 	const u16 *chdataptr = &text_bitmap[ch][0];
-	for (u32 y = 0; y < OVERLAY_Y_PIXELS; y++)
+	for (u32 y = 0; y < char_height; y++)
 	{
 		u16 chdata = *chdataptr++;
 
-		for (uint32_t x = 0; x < OVERLAY_X_PIXELS; x++, chdata >>= 1)
+		for (uint32_t x = 0; x < char_width; x++, chdata >>= 1)
 		{
 			uint32_t xmin = xminbase + x * xsize;
 			uint32_t xmax = xmin + xsize;
