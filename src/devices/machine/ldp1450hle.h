@@ -62,8 +62,7 @@ protected:
 
 	// internal overlay helpers
 	void overlay_draw_group(bitmap_yuy16 &bitmap, const uint8_t *text, int start, int xstart, int ystart, int mode);
-	void overlay_erase(bitmap_yuy16 &bitmap, float xstart, float xend, int ystart);
-	void overlay_draw_char(bitmap_yuy16 &bitmap, uint8_t ch, float xstart, int ystart);
+	void overlay_draw_char(bitmap_yuy16 &bitmap, uint8_t ch, float xstart, int ystart, int char_width, int char_height);
 
 private:
 	enum player_command : u16
