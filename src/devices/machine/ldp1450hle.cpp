@@ -201,12 +201,29 @@ static const u16 text_bitmap[0x60][0x10] =
 };
 
 #define OVERLAY_PIXEL_WIDTH             (1.0f / 720.0f)
-#define OVERLAY_PIXEL_HEIGHT            1
+#define OVERLAY_PIXEL_HEIGHT            0.5f
 
 //-------------------------------------------------
 //  overlay_draw_group - draw a single group of
 //  characters
 //-------------------------------------------------
+
+void sony_ldp1450hle_device::overlay_fill(bitmap_yuy16 &bitmap, uint8_t yval, uint8_t cr, uint8_t cb)
+{
+	uint16_t color0 = (yval << 8) | cb;
+	uint16_t color1 = (yval << 8) | cr;
+
+	// write 32 bits of color (2 pixels at a time)
+	for (int y = 0; y < bitmap.height(); y++)
+	{
+		uint16_t *dest = &bitmap.pix(y);
+		for (int x = 0; x < bitmap.width() / 2; x++)
+		{
+			*dest++ = color0;
+			*dest++ = color1;
+		}
+	}
+}
 
 void sony_ldp1450hle_device::overlay_draw_group(bitmap_yuy16 &bitmap, const uint8_t *text, int start, int xstart, int ystart, int mode)
 {
@@ -217,19 +234,7 @@ void sony_ldp1450hle_device::overlay_draw_group(bitmap_yuy16 &bitmap, const uint
 
 	if (m_user_index_mode & 0x80)
 	{
-		//Draw a blue screen overlay on the screen as a pseudo squelch
-		uint16_t color0 = (40 << 8) | 0xf0;
-		uint16_t color1 = (40 << 8) | 0x6d;
-
-		for (int y = 0; y < bitmap.height(); y++)
-		{
-			uint16_t *dest = &bitmap.pix(y);
-			for (int x = 0; x < bitmap.width() / 2; x++)
-			{
-				*dest++ = color0;
-				*dest++ = color1;
-			}
-		}
+		overlay_fill(bitmap, 0x28, 0x6d, 0xf0);
 	}
 
 	// m_user_index_mode >> 5 & 0x04: 0,2 = normal, 1 = 1px shadow, 3 = grey box 
