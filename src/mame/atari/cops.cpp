@@ -614,7 +614,7 @@ void cops_state::base(machine_config &config)
 
 	SONY_LDP1450HLE(config, m_ld, 0);
 	m_ld->set_screen("screen");
-	m_ld->set_overlay(256, 256, FUNC(cops_state::screen_update));
+	m_ld->set_overlay(720, 480, FUNC(cops_state::screen_update));
 	m_ld->add_route(0, "lspeaker", 0.50);
 	m_ld->add_route(1, "rspeaker", 0.50);
 	m_ld->set_baud(9600);
