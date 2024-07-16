@@ -23,12 +23,13 @@
           - Leadout Symbol
           - OSD
           - Status Requests
-          - UI text display (Nova games, DL2 need this)
         * Repeat behaviour for reverse play should restart in reverse
         * Delay timing of queue is a guess based on LDP1000A guide
         * Not all features are fully hooked up
         * Still step back and forth in Time Traveler glitches
           - (level select doesn't stay in place)
+		* resizing, positioning of OSD bitmaps is not optimal
+		  - only 16x16 is correctly supported, resizing seems off
 *************************************************************************/
 
 #include "emu.h"
@@ -47,7 +48,7 @@
 #define LOG_ALL                 (LOG_COMMAND_BYTES | LOG_COMMANDS | LOG_COMMAND_BUFFERS | LOG_REPLY_BYTES | LOG_SEARCHES | LOG_STOPS | LOG_SQUELCHES | LOG_FRAMES)
 
 
-#define VERBOSE 1
+#define VERBOSE 0
 
 #include "logmacro.h"
 
@@ -134,12 +135,12 @@ static const u16 text_bitmap[0x60][0x10] =
 	{ 0 },
 	{ 0 },
 	{ 0 },
-	{ 0 },								    // <space>
+	{ 0 },																	  									    // <space>
 	{0x0000,0x0000,0x00c0,0x00c0,0x00c0,0x00c0,0x00c0,0x00c0,0x00c0,0x00c0,0x00c0,0x00c0,0x0000,0x0000,0x00c0,0x00c0},// !
-	{ 0 },                                  // 
-	{ 0 },                                  // 
-	{ 0 },                                  // 
-	{ 0 },                                  // 
+	{ 0 },
+	{ 0 },
+	{ 0 },
+	{ 0 },
 	{0x0000,0x0000,0x00f0,0x01f8,0x039c,0x038c,0x01cc,0x00fc,0x30fc,0x3878,0x1cf8,0x0fcc,0x0786,0x0787,0x3ffe,0x3cfc}, // &
 	{0x0000,0x0000,0x03c0,0x03c0,0x0300,0x0380,0x01c0,0x00c0,0x0000,0x0000,0x0000,0x0000,0x0000,0x0000,0x0000,0x0000}, // '
 	{0x0000,0x0000,0x3000,0x3800,0x1c00,0x0c00,0x0c00,0x0c00,0x0c00,0x0c00,0x0c00,0x0c00,0x0c00,0x1c00,0x3800,0x3000}, // (
@@ -200,8 +201,8 @@ static const u16 text_bitmap[0x60][0x10] =
 	{0x0000,0x0000,0x0000,0x0000,0x0000,0x0000,0x0000,0x1ff8,0x1ff8,0x0000,0x0000,0x0000,0x0000,0x0000,0x0000,0x0000}, // -
 };
 
-#define OVERLAY_PIXEL_WIDTH             (1.0f / 720.0f)
-#define OVERLAY_PIXEL_HEIGHT            0.5f
+#define OVERLAY_PIXEL_WIDTH             (1.3f / 720.0f)//1
+#define OVERLAY_PIXEL_HEIGHT            1//0.5f
 
 //-------------------------------------------------
 //  overlay_draw_group - draw a single group of
@@ -230,14 +231,12 @@ void sony_ldp1450hle_device::overlay_draw_group(bitmap_yuy16 &bitmap, const uint
 
 	u8 char_width = text_size[m_user_index_mode & 0x04];
 	u8 char_height = text_size[m_user_index_mode >> 2 & 0x04];
-	float xstart_normalised = (720.0f/ 64) * xstart;
-
+	float xstart_normalised = (710.0f/ 64) * xstart;
 	if (m_user_index_mode & 0x80)
 	{
 		overlay_fill(bitmap, 0x28, 0x6d, 0xf0);
 	}
 
-	// m_user_index_mode >> 5 & 0x04: 0,2 = normal, 1 = 1px shadow, 3 = grey box 
 
 	u8 count;
 	if (m_user_index_mode & 0x10) // 3 line mode
@@ -289,40 +288,58 @@ void sony_ldp1450hle_device::overlay_draw_group(bitmap_yuy16 &bitmap, const uint
 void sony_ldp1450hle_device::overlay_draw_char(bitmap_yuy16 &bitmap, uint8_t ch, float xstart, int ystart, int char_width, int char_height)
 {
 
-	// m_user_index_mode
+	// m_user_index_mode >> 5 & 0x04: 0,2 = normal, 1 = 1px shadow, 3 = grey box 
 
 	u32 xminbase = uint32_t(xstart * 256.0f * float(bitmap.width()));
 	u32 xsize = uint32_t(OVERLAY_PIXEL_WIDTH * 256.0f * float(bitmap.width()));
 
+
+	uint16_t white = 0xeb80;
+	uint16_t black = 0x0080;
+
+	bitmap_yuy16 char_bmp = bitmap_yuy16(16,16);
+
+	u8 modeval= (m_user_index_mode >> 5) & 0x04;
+	
+	if (modeval==0x03)
+	{
+		overlay_fill(char_bmp, 0x9a, 0x80, 0x80);
+	}
+	else
+	{
+		overlay_fill(char_bmp, 0x00, 0x80, 0x80);
+	}
+
 	// iterate over pixels
 	const u16 *chdataptr = &text_bitmap[ch][0];
-	for (u32 y = 0; y < char_height; y++)
+
+	for (u8 y = 0; y < 16; y++)
 	{
 		u16 chdata = *chdataptr++;
 
-		for (uint32_t x = 0; x < char_width; x++, chdata >>= 1)
+		for (u8 x = 0; x < 16; x++, chdata >>= 1)
 		{
-			uint32_t xmin = xminbase + x * xsize;
-			uint32_t xmax = xmin + xsize;
-			for (uint32_t yy = 0; yy < OVERLAY_PIXEL_HEIGHT; yy++)
+			if (chdata & 0x01)
 			{
-				uint16_t *dest = &bitmap.pix(ystart + (y + 1) * OVERLAY_PIXEL_HEIGHT + yy, xmin >> 8);
-				uint16_t ymax = 0xff;
-				uint16_t ymin = *dest >> 8;
-				uint16_t yres = ymin + ((ymax - ymin) * (~xmin & 0xff)) / 256;
-				if (chdata & 0x01)
-				{
-					*dest = (yres << 8) | (*dest & 0xff);
-					dest++;
-	
-					for (uint32_t xx = (xmin | 0xff) + 1; xx < xmax; xx += 0x100)
-						*dest++ = 0xf080;
+				char_bmp.pix(y, x) = white;
+			}
+		}
+	}
 
-					ymax = 0xff;
-					ymin = *dest >> 8;
-					yres = ymin + ((ymax - ymin) * (xmax & 0xff)) / 256;
-					*dest = (yres << 8) | (*dest & 0xff);
-					dest++;
+	char_bmp.resize(char_width, char_height);
+
+
+	for (u32 y = 0; y < char_height; y++)
+	{
+		for (u8 x = 0; x < char_width; x++)
+		{
+			u32 xmin = xminbase + x * xsize;
+			for (u32 yy = 0; yy < OVERLAY_PIXEL_HEIGHT; yy++)
+			{
+				// printf("%04x \n",char_bmp.pix(y,x));
+				if (char_bmp.pix(y,x) != black)
+				{	
+					bitmap.pix(ystart + (y + 1) * OVERLAY_PIXEL_HEIGHT + yy, xmin >> 8) = char_bmp.pix(y,x);
 				}
 			}
 		}
