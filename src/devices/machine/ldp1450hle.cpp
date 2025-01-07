@@ -12,7 +12,7 @@
 
     To do:
 
-        * On-screen display support (we just popmessage the data)
+        * On-screen display support 
         * Better CLV support
         * Chapter-search support
         * Repeat support (we only store the command)
@@ -834,23 +834,23 @@ void sony_ldp1450hle_device::add_command_byte(u8 command)
 				queue_reply(0x0a, 0.4);
 				break;
 
-				case CMD_USER_INDEX_ON:
-				{
-					// popmessage("X %x Y %x M%x T%s (Start %x)", m_user_index_x, m_user_index_y, m_user_index_mode, m_user_index_chars,m_user_index_window_idx);
-					m_user_index_flag = true;
-					queue_reply(0x0a, 0.4);
-					break;
-				}
+			case CMD_USER_INDEX_ON:
+			{
+				//popmessage("X %x Y %x M%x (Start %x)", m_user_index_x, m_user_index_y, m_user_index_mode, m_user_index_window_idx);
+				m_user_index_flag = true;
+				queue_reply(0x0a, 0.4);
+				break;
+			}
 
-				case CMD_USER_INDEX_OFF:
-				{
-					m_user_index_flag = false;
-					queue_reply(0x0a, 0.4);
-					break;
-				}
+			case CMD_USER_INDEX_OFF:
+			{
+				m_user_index_flag = false;
+				queue_reply(0x0a, 0.4);
+				break;
+			}
 
 			default:
-				popmessage("no implementation cmd %x", command);
+				fatalerror("no implementation cmd %x", command);
 				queue_reply(0x0b, 0.4);
 				break;
 			}
@@ -1023,11 +1023,11 @@ TIMER_CALLBACK_MEMBER(sony_ldp1450hle_device::process_vbi_data)
 		else
 			m_curr_frame = bcd_to_literal(line & 0x7ffff);
 
-		LOGMASKED(LOG_FRAMES, "Current frame is %d (VBI 16: %06x, VBI 17: %06x, VBI 18: %06x, VBI 1718: %06x\n", m_curr_frame,
-				get_field_code(LASERDISC_CODE_LINE16, false),
-				get_field_code(LASERDISC_CODE_LINE17, false),
-				get_field_code(LASERDISC_CODE_LINE18, false),
-				line);
+		// popmessage("Current frame is %d (VBI 16: %06x, VBI 17: %06x, VBI 18: %06x, VBI 1718: %06x\n", m_curr_frame,
+		// 		get_field_code(LASERDISC_CODE_LINE16, false),
+		// 		get_field_code(LASERDISC_CODE_LINE17, false),
+		// 		get_field_code(LASERDISC_CODE_LINE18, false),
+		// 		line);
 
 		if (m_mode != MODE_STILL && m_mode != MODE_PAUSE)
 		{

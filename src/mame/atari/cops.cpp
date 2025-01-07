@@ -46,6 +46,7 @@
 #include "machine/msm6242.h"
 #include "machine/nvram.h"
 #include "machine/r65c52.h"
+#include "machine/ticket.h"
 #include "machine/watchdog.h"
 #include "sound/sn76496.h"
 
@@ -56,7 +57,7 @@
 
 #define LOG_CDROM   (1U << 1)
 
-#define VERBOSE (LOG_CDROM)
+// #define VERBOSE (LOG_CDROM)
 #include "logmacro.h"
 
 
@@ -75,10 +76,14 @@ public:
 		, m_sn(*this, "snsnd")
 		, m_ld(*this, "laserdisc")
 		, m_dacia(*this, "dacia")
+		, m_via2(*this, "via6522_2")
 		, m_watchdog(*this, "watchdog")
 		, m_meters(*this, "meters")
+		, m_ticket(*this, "ticket")
 		, m_switches(*this, "SW%u", 0U)
 		, m_steer(*this, "STEER")
+		, m_gun_x_io(*this, "GUNX")
+		, m_gun_y_io(*this, "GUNY")
 		, m_digits(*this, "digit%u", 0U)
 		, m_lamps(*this, "lamp%u", 0U)
 		, m_irq(0)
@@ -122,18 +127,26 @@ private:
 	void cdrom_ctrl_w(uint8_t data);
 	uint8_t cdrom_data_r();
 
+	uint8_t gunx_r();
+	uint8_t guny_r();
+
 	// devices
 	required_device<cpu_device> m_maincpu;
 	required_shared_ptr<uint8_t> m_nvram;
 	required_device<sn76489_device> m_sn;
 	required_device<sony_ldp1450hle_device> m_ld;
 	required_device<r65c52_device> m_dacia;
+	optional_device<via6522_device> m_via2;
 	required_device<watchdog_timer_device> m_watchdog;
 	optional_device<meters_device> m_meters;
+	optional_device<ticket_dispenser_device> m_ticket;
 
 	// I/O
 	required_ioport_array<3> m_switches;
 	optional_ioport m_steer;
+	optional_ioport m_gun_x_io;
+	optional_ioport m_gun_y_io;
+
 	output_finder<16> m_digits;
 	output_finder<23> m_lamps;
 
@@ -170,7 +183,7 @@ void cops_state::cdrom_data_w(uint8_t data)
 
 void cops_state::cdrom_ctrl_w(uint8_t data)
 {
-	LOGMASKED(LOG_CDROM, "%s:cdrom_ctrl_w(%02x)\n", machine().describe_context(), data);
+	logerror("%s:cdrom_ctrl_w(%02x)\n", machine().describe_context(), data);
 	m_cdrom_ctrl = data;
 }
 
@@ -178,8 +191,22 @@ uint8_t cops_state::cdrom_data_r()
 {
 	const char *regs[4] = { "STATUS", "RESULT", "READ", "FIFOST" };
 	uint8_t reg = ((m_cdrom_ctrl & 4) >> 1) | ((m_cdrom_ctrl & 8) >> 3);
-	LOGMASKED(LOG_CDROM, "%s:cdrom_data_r(reg = %s)\n", machine().describe_context(), regs[reg & 0x03]);
+	logerror("%s:cdrom_data_r(reg = %s)\n", machine().describe_context(), regs[reg & 0x03]);
+	if (reg == 0x01)
+	{
+		return 0x24;
+	}
 	return machine().rand()&0xff;
+}
+
+uint8_t cops_state::gunx_r()
+{
+	return m_gun_x_io->read();
+}
+
+uint8_t cops_state::guny_r()
+{
+	return m_gun_y_io->read();
 }
 
 /*************************************
@@ -211,30 +238,10 @@ inline void cops_state::dacia_irq()
  *
  *************************************/
 
-uint8_t cops_state::io1_cops_r(offs_t offset)
-{
-	switch( offset & 0x0f )
-	{
-		case 0x07: /* WOP7 - watchdog*/
-			return 1;
-		case 0x08:  /* SW0 */
-			return m_switches[0]->read();
-		case 0x09:  /* SW1 */
-			return m_switches[1]->read();
-		case 0x0a:  /* SW2 */
-			return m_switches[2]->read();
-		default:
-			logerror("Unknown io1_r, offset = %03x\n", offset);
-			return 0;
-	}
-}
-
 uint8_t cops_state::io1_r(offs_t offset)
 {
 	switch( offset & 0x0f )
 	{
-		case 0x01:  /* SW0 */
-			return m_switches[0]->read();
 		case 0x07: /* WOP7 - watchdog*/
 			return 1;
 		case 0x08:  /* SW0 */
@@ -404,18 +411,23 @@ uint8_t cops_state::io2_r(offs_t offset)
 		case 0x03:
 			return m_steer->read();
 		default:
-			logerror("Unknown io2_r, offset = %02x\n", offset);
+			popmessage("Unknown io2_r, offset = %02x\n", offset);
 			return 0;
 	}
 }
 
 void cops_state::io2_w(offs_t offset, uint8_t data)
 {
+	
 	switch( offset & 0x0f )
 	{
 		case 0x02:
 			m_lamps[0xf] = BIT(data, 0); // Flash red
 			m_lamps[0x10] = BIT(data, 7); // Flash blue
+
+			m_ticket->motor_w(BIT(data, 6));
+			// popmessage("Unknown io2_w, offset = %03x, data = %02x\n", offset, data);
+
 			// Any other I/O here?
 			break;
 		case 0x04:
@@ -457,6 +469,7 @@ void cops_state::via1_irq(int state)
 
 void cops_state::via1_a_w(uint8_t data)
 {
+	// popmessage("FADE %x", data);
 }
 
 void cops_state::via1_b_w(uint8_t data)
@@ -506,7 +519,7 @@ void cops_state::cops_map(address_map &map)
 {
 	map(0x0000, 0x1fff).ram().share(m_nvram);
 	map(0x2000, 0x9fff).rom().region("program", 0);
-	map(0xa000, 0xafff).rw(FUNC(cops_state::io1_cops_r), FUNC(cops_state::io1_cops_w));
+	map(0xa000, 0xafff).rw(FUNC(cops_state::io1_r), FUNC(cops_state::io1_cops_w));
 	map(0xb000, 0xb00f).m("via6522_1", FUNC(via6522_device::map));  /* VIA 1 */
 	map(0xb800, 0xb80f).m("via6522_2", FUNC(via6522_device::map));  /* VIA 2 */
 	map(0xc000, 0xcfff).rw(FUNC(cops_state::io2_r), FUNC(cops_state::io2_w));
@@ -528,29 +541,38 @@ void cops_state::revlatns_map(address_map &map)
 
 static INPUT_PORTS_START( cops )
 	PORT_START("SW0")
-	PORT_BIT( 0x01, IP_ACTIVE_LOW, IPT_OTHER ) PORT_NAME("Switch A") PORT_CODE(KEYCODE_A) PORT_IMPULSE(1)
-	PORT_BIT( 0x02, IP_ACTIVE_LOW, IPT_OTHER ) PORT_NAME("Switch C") PORT_CODE(KEYCODE_C) PORT_IMPULSE(1)
+	PORT_BIT( 0x01, IP_ACTIVE_LOW, IPT_BUTTON1 ) PORT_NAME("A")
+	PORT_BIT( 0x02, IP_ACTIVE_LOW, IPT_OTHER ) PORT_NAME("C") PORT_CODE(KEYCODE_C) PORT_IMPULSE(1)
 	PORT_BIT( 0x04, IP_ACTIVE_LOW, IPT_OTHER ) PORT_NAME("PROGRAM") PORT_CODE(KEYCODE_P)
 	PORT_BIT( 0x08, IP_ACTIVE_LOW, IPT_COIN2 )
 	PORT_BIT( 0x10, IP_ACTIVE_LOW, IPT_SERVICE1 ) PORT_IMPULSE(1)
 	PORT_BIT( 0x20, IP_ACTIVE_LOW, IPT_COIN1 )
 	PORT_BIT( 0x40, IP_ACTIVE_LOW, IPT_START )
-	PORT_BIT( 0x80, IP_ACTIVE_LOW, IPT_OTHER ) PORT_NAME("Switch B") PORT_CODE(KEYCODE_B) PORT_IMPULSE(1)
+	PORT_BIT( 0x80, IP_ACTIVE_LOW, IPT_OTHER ) PORT_NAME("B") PORT_CODE(KEYCODE_B) PORT_IMPULSE(1)
 
 	PORT_START("SW1")
-	PORT_BIT( 0x01, IP_ACTIVE_LOW, IPT_UNUSED ) // N.C.
-	PORT_BIT( 0x02, IP_ACTIVE_LOW, IPT_BUTTON1 ) // Gas pedal
+	PORT_BIT( 0x01, IP_ACTIVE_HIGH, IPT_UNUSED ) // N.C.
+	PORT_BIT( 0x02, IP_ACTIVE_LOW, IPT_BUTTON2 ) // Gas pedal
 	PORT_BIT( 0x04, IP_ACTIVE_LOW, IPT_OTHER ) PORT_NAME("20P LEVEL") PORT_CODE(KEYCODE_Q)
 	PORT_BIT( 0x38, IP_ACTIVE_LOW, IPT_UNUSED )
 	PORT_BIT( 0x40, IP_ACTIVE_LOW, IPT_SERVICE )
 	PORT_BIT( 0x80, IP_ACTIVE_LOW, IPT_OTHER ) PORT_NAME("100P LEVEL") PORT_CODE(KEYCODE_W)
 
-	PORT_START("SW2") //GUN?
-	PORT_BIT( 0x7f, IP_ACTIVE_LOW, IPT_UNUSED )
+	PORT_START("SW2")
+	PORT_BIT( 0x01, IP_ACTIVE_LOW, IPT_OTHER ) //coin 3
+	PORT_BIT( 0x02, IP_ACTIVE_LOW, IPT_OTHER ) //coin 2
+	PORT_BIT( 0x04, IP_ACTIVE_LOW, IPT_OTHER ) //coin 1
+	PORT_BIT( 0x08, IP_ACTIVE_LOW, IPT_OTHER ) //coin 4
 	PORT_BIT( 0x80, IP_ACTIVE_HIGH, IPT_UNUSED ) //Left floating, games will fail to boot if this is low
 
+	PORT_START("GUNX")
+	PORT_BIT( 0xff, 0x80, IPT_LIGHTGUN_X ) PORT_CROSSHAIR(X, 1.0, 0.0, 0) PORT_SENSITIVITY(50) PORT_KEYDELTA(10)
+
+	PORT_START("GUNY")
+	PORT_BIT( 0xff, 0x80, IPT_LIGHTGUN_Y ) PORT_CROSSHAIR(Y, 1.0, 0.0, 0) PORT_SENSITIVITY(70) PORT_KEYDELTA(10)
+
 	PORT_START("STEER")
-	PORT_BIT( 0xff, 0x80, IPT_PADDLE ) PORT_SENSITIVITY(50) PORT_KEYDELTA(10)
+	PORT_BIT( 0xff, 0x80, IPT_PADDLE ) PORT_SENSITIVITY(50) PORT_KEYDELTA(10) PORT_REVERSE
 INPUT_PORTS_END
 
 static INPUT_PORTS_START( revlatns )
@@ -646,6 +668,8 @@ void cops_state::cops(machine_config &config)
 
 	m_maincpu->set_addrmap(AS_PROGRAM, &cops_state::cops_map);
 
+	TICKET_DISPENSER(config, "ticket", attotime::from_msec(100));
+
 	/* via */
 	via6522_device &via1(MOS6522(config, "via6522_1", MAIN_CLOCK/4));
 	via1.irq_handler().set(FUNC(cops_state::via1_irq));
@@ -653,8 +677,10 @@ void cops_state::cops(machine_config &config)
 	via1.writepb_handler().set(FUNC(cops_state::via1_b_w));
 	via1.cb1_handler().set(FUNC(cops_state::via1_cb1_w));
 
-	via6522_device &via2(MOS6522(config, "via6522_2", MAIN_CLOCK/4));
+	via6522_device &via2(MOS6522(config, m_via2, MAIN_CLOCK/4));
 	via2.irq_handler().set(FUNC(cops_state::via2_irq));
+	via2.readpa_handler().set(FUNC(cops_state::gunx_r));
+	via2.readpb_handler().set(FUNC(cops_state::guny_r));
 
 	via6522_device &via3(MOS6522(config, "via6522_3", MAIN_CLOCK/4));
 	via3.readpa_handler().set(FUNC(cops_state::cdrom_data_r));
