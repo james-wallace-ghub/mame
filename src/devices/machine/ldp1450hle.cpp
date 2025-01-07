@@ -834,20 +834,20 @@ void sony_ldp1450hle_device::add_command_byte(u8 command)
 				queue_reply(0x0a, 0.4);
 				break;
 
-			case CMD_USER_INDEX_ON:
-			{
-				//popmessage("X %x Y %x M%x (Start %x)", m_user_index_x, m_user_index_y, m_user_index_mode, m_user_index_window_idx);
-				m_user_index_flag = true;
-				queue_reply(0x0a, 0.4);
-				break;
-			}
+				case CMD_USER_INDEX_ON:
+				{
+					// popmessage("X %x Y %x M%x T%s (Start %x)", m_user_index_x, m_user_index_y, m_user_index_mode, m_user_index_chars,m_user_index_window_idx);
+					m_user_index_flag = true;
+					queue_reply(0x0a, 0.4);
+					break;
+				}
 
-			case CMD_USER_INDEX_OFF:
-			{
-				m_user_index_flag = false;
-				queue_reply(0x0a, 0.4);
-				break;
-			}
+				case CMD_USER_INDEX_OFF:
+				{
+					m_user_index_flag = false;
+					queue_reply(0x0a, 0.4);
+					break;
+				}
 
 			default:
 				fatalerror("no implementation cmd %x", command);

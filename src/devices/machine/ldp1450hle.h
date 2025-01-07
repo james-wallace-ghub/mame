@@ -192,11 +192,11 @@ private:
 	u32            m_curr_frame;
 
 	bool           m_user_index_flag;
-	u8             m_user_index_x=0;
-	u8             m_user_index_y=0;
-	u8             m_user_index_mode=0;
-	u8             m_user_index_char_idx=0;
-	u8             m_user_index_window_idx=0;
+	u8             m_user_index_x;
+	u8             m_user_index_y;
+	u8             m_user_index_mode;
+	u8             m_user_index_char_idx;
+	u8             m_user_index_window_idx;
 	u8	           m_user_index_chars[32];
 
 };
