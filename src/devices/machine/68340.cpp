@@ -54,8 +54,10 @@ void m68340_cpu_device::update_ipl()
 		pit_irq_level(),
 		m_serial->irq_level(),
 		m_timer[0]->irq_level(),
-		m_timer[1]->irq_level()
-	});
+		m_timer[1]->irq_level(),
+		m_dma->irq_level(0),
+		m_dma->irq_level(1)
+});
 	if (m_ipl != new_ipl)
 	{
 		if (m_ipl != 0)
@@ -79,8 +81,11 @@ uint8_t m68340_cpu_device::int_ack(offs_t offset)
 	uint8_t scu_iarb = m_serial->arbitrate(offset);
 	uint8_t t1_iarb = m_timer[0]->arbitrate(offset);
 	uint8_t t2_iarb = m_timer[1]->arbitrate(offset);
-	uint8_t iarb = std::max({pit_iarb, scu_iarb, t1_iarb, t2_iarb});
-	LOGMASKED(LOG_IPL, "Level %d interrupt arbitration: PIT = %X, SCU = %X, T1 = %X, T2 = %X\n", offset, pit_iarb, scu_iarb, t1_iarb, t2_iarb);
+	uint8_t dma1_iarb = m_dma->arbitrate(0, offset);
+	uint8_t dma2_iarb = m_dma->arbitrate(1, offset);
+
+	uint8_t iarb = std::max({pit_iarb, scu_iarb, t1_iarb, t2_iarb, dma1_iarb, dma2_iarb});
+	LOGMASKED(LOG_IPL, "Level %d interrupt arbitration: PIT = %X, SCU = %X, T1 = %X, T2 = %X DMA1 = %X, DMA2 = %X\n", offset, pit_iarb, scu_iarb, t1_iarb, t2_iarb, dma1_iarb,dma2_iarb );
 	int response = 0;
 	uint8_t vector = 0x18; // Spurious interrupt
 
@@ -114,6 +119,21 @@ uint8_t m68340_cpu_device::int_ack(offs_t offset)
 			LOGMASKED(LOG_IPL, "PIT acknowledged interrupt with vector %02X\n", vector);
 			response++;
 		}
+
+		if (iarb == dma1_iarb)
+		{
+			vector = m_dma->irq_vector(0);
+			LOGMASKED(LOG_IPL, "DMA CH1 acknowledged interrupt with vector %02X\n", vector);
+			response++;
+		}
+
+		if (iarb == dma2_iarb)
+		{
+			vector = m_dma->irq_vector(1);
+			LOGMASKED(LOG_IPL, "DMA CH2 acknowledged interrupt with vector %02X\n", vector);
+			response++;
+		}
+
 	}
 
 	if (response == 0)
@@ -196,8 +216,8 @@ void m68340_cpu_device::m68340_internal_base_w(offs_t offset, uint16_t data, uin
 					read8sm_delegate(*m_serial, FUNC(mc68340_serial_module_device::read)),
 					write8sm_delegate(*m_serial, FUNC(mc68340_serial_module_device::write)),0xffffffff);
 			m_internal->install_readwrite_handler(base + 0x780, base + 0x7bf,
-					read16s_delegate(*this, FUNC(m68340_cpu_device::m68340_internal_dma_r)),
-					write16s_delegate(*this, FUNC(m68340_cpu_device::m68340_internal_dma_w)));
+					read16s_delegate(*m_dma, FUNC(mc68340_dma_module_device::read)),
+					write16s_delegate(*m_dma, FUNC(mc68340_dma_module_device::write)),0xffffffff);
 		}
 	}
 	else
@@ -222,6 +242,7 @@ void m68340_cpu_device::device_add_mconfig(machine_config &config)
 	m_serial->irq_cb().set(m_serial, FUNC(mc68340_serial_module_device::irq_w));
 	MC68340_TIMER_MODULE(config, m_timer[0]);
 	MC68340_TIMER_MODULE(config, m_timer[1]);
+	MC68340_DMA_MODULE(config, m_dma);
 }
 
 
@@ -233,6 +254,7 @@ m68340_cpu_device::m68340_cpu_device(const machine_config &mconfig, const char *
 	: fscpu32_device(mconfig, tag, owner, clock, M68340, address_map_constructor(FUNC(m68340_cpu_device::m68340_internal_map), this))
 	, m_serial(*this, "serial")
 	, m_timer(*this, "timer%u", 1U)
+	, m_dma(*this, "dma")
 	, m_clock_mode(0)
 	, m_crystal(0)
 	, m_extal(0)
@@ -242,7 +264,6 @@ m68340_cpu_device::m68340_cpu_device(const machine_config &mconfig, const char *
 	, m_pb_in_cb(*this, 0)
 {
 	m_m68340SIM = nullptr;
-	m_m68340DMA = nullptr;
 	m_m68340_base = 0;
 	m_ipl = 0;
 	m_cpu_space_config.m_internal_map = address_map_constructor(FUNC(m68340_cpu_device::internal_vectors_r), this);
@@ -267,10 +288,8 @@ void m68340_cpu_device::device_start()
 	fscpu32_device::device_start();
 
 	m_m68340SIM    = new m68340_sim();
-	m_m68340DMA    = new m68340_dma();
-
 	m_m68340SIM->reset();
-	m_m68340DMA->reset();
+	m_dma->reset();
 
 	start_68340_sim();
 
@@ -294,7 +313,7 @@ void m68340_cpu_device::reset_peripherals(int state)
 	if (state)
 	{
 		m_m68340SIM->module_reset();
-		m_m68340DMA->module_reset();
+		m_dma->module_reset();
 		m_serial->module_reset();
 		m_timer[0]->module_reset();
 		m_timer[1]->module_reset();
